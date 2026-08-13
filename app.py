@@ -58,6 +58,16 @@ from datetime import timedelta
 template_dir = os.path.join(BASE_PATH, 'templates')
 static_dir = os.path.join(BASE_PATH, 'static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+
+import jinja2
+app.jinja_loader = jinja2.ChoiceLoader([
+    app.jinja_loader,
+    jinja2.FileSystemLoader(template_dir),
+    jinja2.FileSystemLoader('templates'),
+    jinja2.FileSystemLoader(os.path.join(os.getcwd(), 'templates')),
+    jinja2.FileSystemLoader(os.path.join(BASE_PATH, 'templates')),
+])
+
 app.register_blueprint(screening_bp)
 app.secret_key = os.environ.get("SECRET_KEY", "btzi-intrinsic-valuation-2024")
 app.permanent_session_lifetime = timedelta(hours=1)
