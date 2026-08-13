@@ -1024,6 +1024,18 @@ table.data-table tbody tr.active-row {
   margin-left: 4px;
 }
 
+.pts-neg {
+  font-weight: 800;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
 
 /* ======================================================== PIPELINE FLOWCHART (NATIVE HTML) */
 .flowchart-pipeline-container {
