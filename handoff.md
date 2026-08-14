@@ -32,39 +32,28 @@
 
 ## 2. Work Completed Today (2026-08-14)
 
-### Dynamic YoY & QoQ Sales Growth Engine & VBA Master Benchmark (v6.3 Release)
+### Dynamic YoY & QoQ Sales Growth Engine, VBA Master Benchmark & AI Shortlist Completeness (v6.3 Release)
 
-1. **VBA Master Benchmark (`VBA_Code_02052026.docx`)**:
+1. **AI Top 10 Shortlist Full Metric Pipeline**:
+   - Fixed missing metrics (`ROE: 0.0%`, `D/E: —`, `EPS Gr: —`, `Yield: —`, and hardcoded `Sale Gr: 5.0%`).
+   - Updated `compute_stock_valuation()` in `ai_ranking_engine.py` to compute all 5 Fair Value methods and forecast metrics (`yoy_eps_growth`, `forecast_yield`).
+   - Passed `roe`, `de`, actual `yoy_sales_growth`, `qoq_sales_growth`, `yoy_eps_growth`, and all 5 FV methods into `candidate_dataset`, `final_rankings`, and `addAiStockToShortlist()`.
+   - Updated `renderShortList()` in `static/app.js` with defensive fallbacks.
+   - Refreshed all existing records in `shortlist.json`.
+
+2. **VBA Master Benchmark (`VBA_Code_02052026.docx`)**:
    - Compared formulas with Python engine across AOT, PTTEP, CPN, IVL.
    - Verified that all 5 Fair Value models (DCF, DIV, DDM, PER, PBV), Quarter Multiplier (Q1-Q4), Forecast DPS, Forecast Yield, MOS, DuPont, and 11/13 color ratings match 100%.
    - Fixed negative ratio coloring (`(None, "red")`) so negative NPM/ROE/ROTC/ROIC show red instead of falling through to gray.
    - Added `peg_fallback` to `calc_forecast_metrics()` to utilize published market PEG when intra-year growth is non-positive.
 
-2. **Root Cause Diagnosis**:
-   - Identified why Sale Growth was always defaulting to 5%: hardcoded `value="5"` default in UI `#saleGrowth` input, server fallback in `/api/valuate`, and hardcoded `0.05` (5%) for DCF 5-yr projection in `ai_ranking_engine.py`.
-
-3. **Data Fetcher Upgrade (`data_fetcher.py`)**:
-   - Implemented `_get_historical_sales_growth(ticker, info)` helper to calculate actual `yoy_sales_growth` (%) and `qoq_sales_growth` (%) from quarterly/annual income statements and yfinance data.
-   - Added `yoy_sales_growth` and `qoq_sales_growth` to returned market data dictionary.
-
-4. **Valuation Endpoint Upgrade (`app.py`)**:
+3. **Data Fetcher & Valuation Endpoint Upgrades (`data_fetcher.py`, `app.py`)**:
+   - Implemented `_get_historical_sales_growth(ticker, info)` helper to calculate actual `yoy_sales_growth` (%) and `qoq_sales_growth` (%) from financial statements.
    - Updated `/api/valuate` to dynamically default `sale_growth_pct` to stock's actual YoY sales growth when user simulation input is omitted.
-   - Preserved full user simulation functionality when custom values are entered.
-   - Returned `yoy_sales_growth` and `qoq_sales_growth` in API JSON output.
 
-5. **DCF & AI Ranking Integration (`ai_ranking_engine.py`)**:
-   - Updated Stage 2 DCF valuation in AI Top 10 Ranking to use each stock's actual YoY sales growth (clamped between `-10%` and `+25%` for 5-year projections to prevent one-off outliers from distorting long-term DCF).
-   - Appended actual YoY and QoQ sales growth metrics to candidate dataset and final AI ranking card payloads.
-
-6. **Dashboard UI Upgrades (`templates/index.html`, `static/app.js`, `static/ai_ranking.js`)**:
-   - Added real-time `Actual YoY: XX.X% | QoQ: YY.Y%` badges under Trial & Simulation panel in `index.html`.
-   - Updated `runValuation()` and `renderResult()` in `app.js` to render actual growth metrics while supporting user simulations.
-   - Updated `addAiCardToShortlist` in `ai_ranking.js` to pass actual sales growth into shortlist payloads.
-
-7. **Documentation & Verification**:
-   - Appended Lessons AE & AF to `lessons_learned.md`.
-   - Created `vba_vs_python_comparison.md` benchmark artifact.
-   - Passed all automated integration tests across sample SET stocks (`DELTA`, `PTT`, `CPALL`, `AOT`, `PTTEP`, `CPN`, `IVL`).
+4. **Documentation & Verification**:
+   - Appended Lessons AE, AF & AG to `lessons_learned.md`.
+   - Passed all automated integration tests across sample SET stocks (`BANPU`, `OSP`, `TCAP`, `RATCH`, `AOT`).
 
 ---
 
@@ -89,14 +78,14 @@ Tab System Rule:
 
 | File | Changes |
 |------|---------|
+| `ai_ranking_engine.py` | Computed all 5 FV methods & forecast metrics in `compute_stock_valuation()`; passed `roe`, `de`, `yoy_sales_growth`, `yoy_eps_growth` in dataset/rankings |
+| `static/ai_ranking.js` | Updated `addAiStockToShortlist()` payload with full metrics & `.toLocaleString()` timestamp; removed hardcoded 5% fallback |
+| `static/app.js` | Added defensive fallback accessors in `renderShortList()` for seamless dual-source shortlist rendering |
 | `valuation_engine.py` | Fixed negative ratio color threshold `(None, "red")`; added `peg_fallback` support in `calc_forecast_metrics()` |
 | `app.py` | Passed `peg_fallback` to `calc_forecast_metrics()`; updated `/api/valuate` to dynamically default to actual YoY sales growth |
 | `data_fetcher.py` | Added `_get_historical_sales_growth()` helper; added `yoy_sales_growth` & `qoq_sales_growth` to return dict |
-| `ai_ranking_engine.py` | Updated Stage 2 DCF calculation to use clamped actual YoY sales growth; added sales growth to ranking card payload |
-| `templates/index.html` | Added Actual YoY & QoQ badges to Trial & Simulation panel; updated `#saleGrowth` input placeholder |
-| `static/app.js` | Updated `runValuation()` and `renderResult()` to render actual YoY/QoQ sales growth while retaining simulation support |
-| `static/ai_ranking.js` | Updated shortlist payload generator to use actual YoY sales growth |
-| `lessons_learned.md` | Appended Lessons AE & AF |
+| `shortlist.json` | Refreshed existing shortlist entries with complete fundamental metrics |
+| `lessons_learned.md` | Appended Lessons AE, AF & AG |
 | `handoff.md` | This document — updated end-of-session |
 
 ---
@@ -105,7 +94,7 @@ Tab System Rule:
 
 | Item | Notes |
 |------|-------|
-| Git commit | Run `git add . && git commit -m "v6.3 Dynamic Sales Growth Engine & VBA Alignment"` when ready to push to Render cloud. |
+| Git commit | Run `git add . && git commit -m "v6.3 Complete Shortlist Pipeline & Dynamic Sales Growth"` when ready to push to Render cloud. |
 
 ---
 

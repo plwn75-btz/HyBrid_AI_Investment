@@ -22,10 +22,13 @@ from screening_engine import run_screening, get_default_date
 from data_fetcher import get_yf_data, get_momentum_data, determine_sector_type
 from valuation_engine import (
     calc_fair_value_dcf,
+    calc_fair_value_div,
+    calc_fair_value_ddm,
     calc_fair_value_per,
     calc_fair_value_pbv,
     build_bank_valuation,
     calc_margin_of_safety,
+    calc_forecast_metrics,
     safe_float
 )
 from set50_list import is_set50, is_set100
@@ -44,14 +47,12 @@ DEFAULT_WEIGHTS = {
 
 CANDIDATE_CAP = 25  # Default candidate cap if process_all=False
 
-# (Lines 46 to 326 remain unchanged)
-
 
 
 def compute_stock_valuation(yf_raw):
     """
     Computes fair value and valuation metrics for a stock matching app.py logic.
-    Returns dict with fair_value and fair_value_method_note for UI explanation.
+    Returns dict with fair_value, all 5 Fair Value methods, forecast metrics, and UI notes.
     """
     price = safe_float(yf_raw.get("price"))
     eps = safe_float(yf_raw.get("eps"))
@@ -83,6 +84,7 @@ def compute_stock_valuation(yf_raw):
 
     fair_val = 0.0
     method_note = "N/A"
+    fv_dcf, fv_div, fv_ddm, fv_per, fv_pbv = None, None, None, None, None
 
     if is_financial:
         rf = 0.022
@@ -100,7 +102,12 @@ def compute_stock_valuation(yf_raw):
             pbv_benchmark=1.5,
             g_terminal=0.03
         )
-        fair_val = safe_float(bank_vals.get("fv_div") or bank_vals.get("fv_ddm") or bank_vals.get("fv_pbv") or 0.0)
+        fv_dcf = bank_vals.get("fv_dcf")
+        fv_div = bank_vals.get("fv_div")
+        fv_ddm = bank_vals.get("fv_ddm")
+        fv_per = bank_vals.get("fv_per")
+        fv_pbv = bank_vals.get("fv_pbv")
+        fair_val = safe_float(fv_div or fv_ddm or fv_pbv or 0.0)
         method_note = "Bank Justified P/BV & DDM Model"
     else:
         revenue_m = safe_float(yf_raw.get("revenue_m"))
@@ -111,6 +118,7 @@ def compute_stock_valuation(yf_raw):
         rf = 0.022
         beta = safe_float(yf_raw.get("beta"), 1.0)
         wacc = rf + beta * 0.06
+        cost_of_equity = wacc
 
         # Determine 5-yr sales growth for DCF from stock's actual YoY Sales Growth
         yoy_sg = safe_float(yf_raw.get("yoy_sales_growth"))
@@ -134,6 +142,15 @@ def compute_stock_valuation(yf_raw):
             shares_m=shares_m,
             net_debt=net_debt_m
         )
+
+        # Constant Dividend (Gordon Growth)
+        g_div = min(sale_growth_y1_5, 0.05)
+        fv_div = calc_fair_value_div(dps, cost_of_equity, g_div) if dps > 0 else None
+
+        # 10-year DDM
+        dps_growth = sale_growth_y1_5 * 0.8
+        fv_ddm = calc_fair_value_ddm(dps, dps_growth, cost_of_equity, 0.03) if dps > 0 else None
+
         fv_per = calc_fair_value_per(eps, 15.0)
         fv_pbv = calc_fair_value_pbv(bv_ps, 1.5)
 
@@ -145,9 +162,32 @@ def compute_stock_valuation(yf_raw):
             fair_val = float(np.mean(valid_vals)) if valid_vals else 0.0
             method_note = "Relative PER & PBV Avg (DCF N/A)"
 
+    # Compute forecast metrics
+    hist = yf_raw.get("hist_eps") or {}
+    curr_q_eps = hist.get("curr_q_eps") or eps
+    ttm_eps = hist.get("ttm_eps") or eps
+    prev_year_annual_eps = hist.get("prev_year_annual_eps")
+    multiplier = hist.get("multiplier", 1)
+
+    forecast = calc_forecast_metrics(
+        curr_eps=curr_q_eps,
+        annual_eps=ttm_eps,
+        prev_year_annual_eps=prev_year_annual_eps,
+        pe=pe,
+        avg_payout=payout_pct / 100.0,
+        current_price=price,
+        multiplier=multiplier,
+        peg_fallback=peg,
+    )
+
     return {
         "price": price,
         "fair_value": round(fair_val, 2),
+        "fv_dcf": fv_dcf,
+        "fv_div": fv_div,
+        "fv_ddm": fv_ddm,
+        "fv_per": fv_per,
+        "fv_pbv": fv_pbv,
         "roe": roe,
         "pe": pe,
         "pbv": pbv,
@@ -158,6 +198,11 @@ def compute_stock_valuation(yf_raw):
         "fcf": fcf,
         "yoy_sales_growth": yf_raw.get("yoy_sales_growth"),
         "qoq_sales_growth": yf_raw.get("qoq_sales_growth"),
+        "yoy_eps_growth": forecast.get("yoy_eps_growth"),
+        "forecast_yield": forecast.get("forecast_yield") or div_yield,
+        "forecast_eps": forecast.get("forecast_eps"),
+        "forecast_dps": forecast.get("forecast_dps"),
+        "forecast": forecast,
         "fair_value_method_note": method_note
     }
 
@@ -645,8 +690,20 @@ def run_ai_stock_selection(weights=None, date_str=None, rsi=30, stoch=70, min_cr
             'div_yield': fund_info.get('div_yield', 0),
             'pe': fund_info['pe'],
             'pbv': fund_info['pbv'],
-            'yoy_sales_growth': fund_info.get('yoy_sales_growth'),
-            'qoq_sales_growth': fund_info.get('qoq_sales_growth'),
+            'roe': val_res.get('roe'),
+            'de': val_res.get('debt_to_equity'),
+            'yoy_sales_growth': val_res.get('yoy_sales_growth'),
+            'qoq_sales_growth': val_res.get('qoq_sales_growth'),
+            'yoy_eps_growth': val_res.get('yoy_eps_growth'),
+            'forecast_yield': val_res.get('forecast_yield'),
+            'forecast_eps': val_res.get('forecast_eps'),
+            'forecast_dps': val_res.get('forecast_dps'),
+            'forecast': val_res.get('forecast'),
+            'fv_dcf': val_res.get('fv_dcf'),
+            'fv_div': val_res.get('fv_div'),
+            'fv_ddm': val_res.get('fv_ddm'),
+            'fv_per': val_res.get('fv_per'),
+            'fv_pbv': val_res.get('fv_pbv'),
             'criteria_passed': row.get('criteria_passed', 4),
             'tech_score': round(tech_score, 1),
             'fund_score': round(fund_score, 1),
@@ -706,8 +763,20 @@ def run_ai_stock_selection(weights=None, date_str=None, rsi=30, stoch=70, min_cr
             "div_yield": item.get('div_yield', 0),
             "pe": item['pe'],
             "pbv": item['pbv'],
+            "roe": item.get('roe'),
+            "de": item.get('de'),
             "yoy_sales_growth": item.get('yoy_sales_growth'),
             "qoq_sales_growth": item.get('qoq_sales_growth'),
+            "yoy_eps_growth": item.get('yoy_eps_growth'),
+            "forecast_yield": item.get('forecast_yield'),
+            "forecast_eps": item.get('forecast_eps'),
+            "forecast_dps": item.get('forecast_dps'),
+            "forecast": item.get('forecast'),
+            "fv_dcf": item.get('fv_dcf'),
+            "fv_div": item.get('fv_div'),
+            "fv_ddm": item.get('fv_ddm'),
+            "fv_per": item.get('fv_per'),
+            "fv_pbv": item.get('fv_pbv'),
             "criteria_passed": item['criteria_passed'],
             "composite_score": item['composite_score'],
             "tech_score": item['tech_score'],

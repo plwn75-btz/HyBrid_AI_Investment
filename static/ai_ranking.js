@@ -388,19 +388,27 @@ function addAiStockToShortlist(symbol) {
     symbol: stock.symbol,
     price: stock.price,
     fair_value: stock.fair_value,
-    fv_dcf: (stock.fair_value_method_note || '').includes('DCF') ? stock.fair_value : null,
-    fv_div: (stock.fair_value_method_note || '').includes('DDM') ? stock.fair_value : null,
-    fv_per: stock.pe && stock.price ? Number((stock.price * 15 / stock.pe).toFixed(2)) : null,
-    fv_pbv: stock.pbv && stock.price ? Number((stock.price * 1.5 / stock.pbv).toFixed(2)) : null,
+    fv_dcf: stock.fv_dcf !== undefined ? stock.fv_dcf : ((stock.fair_value_method_note || '').includes('DCF') ? stock.fair_value : null),
+    fv_div: stock.fv_div !== undefined ? stock.fv_div : ((stock.fair_value_method_note || '').includes('DDM') ? stock.fair_value : null),
+    fv_ddm: stock.fv_ddm !== undefined ? stock.fv_ddm : null,
+    fv_per: stock.fv_per !== undefined ? stock.fv_per : (stock.pe && stock.price ? Number((stock.price * 15 / stock.pe).toFixed(2)) : null),
+    fv_pbv: stock.fv_pbv !== undefined ? stock.fv_pbv : (stock.pbv && stock.price ? Number((stock.price * 1.5 / stock.pbv).toFixed(2)) : null),
     mos_dcf: stock.mos_pct,
     pe: stock.pe,
     pbv: stock.pbv,
-    roe: stock.roe || 0,
-    sale_growth: stock.yoy_sales_growth != null ? stock.yoy_sales_growth : 5.0,
-    yoy_sales_growth: stock.yoy_sales_growth,
-    qoq_sales_growth: stock.qoq_sales_growth,
-    forecast_yield: stock.div_yield,
-    timestamp: new Date().toLocaleDateString('en-GB')
+    roe: stock.roe !== undefined ? stock.roe : null,
+    de: stock.de !== undefined ? stock.de : null,
+    sale_growth: stock.yoy_sales_growth !== undefined ? stock.yoy_sales_growth : null,
+    yoy_sales_growth: stock.yoy_sales_growth !== undefined ? stock.yoy_sales_growth : null,
+    qoq_sales_growth: stock.qoq_sales_growth !== undefined ? stock.qoq_sales_growth : null,
+    forecast: {
+      yoy_eps_growth: stock.yoy_eps_growth !== undefined ? stock.yoy_eps_growth : null,
+      forecast_yield: stock.forecast_yield !== undefined ? stock.forecast_yield : stock.div_yield,
+      forecast_eps: stock.forecast_eps !== undefined ? stock.forecast_eps : null,
+      forecast_dps: stock.forecast_dps !== undefined ? stock.forecast_dps : null
+    },
+    forecast_yield: stock.forecast_yield !== undefined ? stock.forecast_yield : stock.div_yield,
+    timestamp: new Date().toLocaleString()
   };
 
   fetch('/api/shortlist/add', {

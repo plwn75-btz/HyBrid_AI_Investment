@@ -689,14 +689,20 @@ function renderShortList(items) {
   }
   tbody.innerHTML = items.map((r, i) => {
     const fc = r.forecast || {};
+    const epsGrowth = fc.yoy_eps_growth !== undefined && fc.yoy_eps_growth !== null ? fc.yoy_eps_growth : r.yoy_eps_growth;
+    const yieldVal = fc.forecast_yield !== undefined && fc.forecast_yield !== null ? fc.forecast_yield : (r.forecast_yield !== undefined && r.forecast_yield !== null ? r.forecast_yield : r.div_yield);
+    const saleGrowth = r.sale_growth !== undefined && r.sale_growth !== null ? r.sale_growth : (r.yoy_sales_growth !== undefined && r.yoy_sales_growth !== null ? r.yoy_sales_growth : r.sale_growth_pct);
+    const roeVal = r.roe !== undefined && r.roe !== null ? r.roe : (r.dupont ? r.dupont.roe_pct : null);
+    const deVal = r.de !== undefined && r.de !== null ? r.de : r.debt_to_equity;
+
     return `<tr>
       <td>${i+1}</td><td>${r.symbol||'—'}</td><td>${fmt(r.price)}</td>
       <td>${fmt(r.fv_dcf)}</td><td>${fmt(r.fv_div)}</td><td>${fmt(r.fv_ddm)}</td>
       <td>${fmt(r.fv_per)}</td><td>${fmt(r.fv_pbv)}</td>
       <td>${r.mos_dcf!=null?(r.mos_dcf>=0?'+':'')+fmt(r.mos_dcf)+'%':'—'}</td>
-      <td>${fmt(r.pe)}</td><td>${fmtP(r.roe)}</td><td>${fmt(r.de)}</td>
-      <td>${fmtP(fc.yoy_eps_growth)}</td><td>${fmtP(r.sale_growth)}</td>
-      <td>${fmtP(fc.forecast_yield)}</td><td>${r.timestamp||'—'}</td>
+      <td>${fmt(r.pe)}</td><td>${fmtP(roeVal)}</td><td>${fmt(deVal)}</td>
+      <td>${fmtP(epsGrowth)}</td><td>${fmtP(saleGrowth)}</td>
+      <td>${fmtP(yieldVal)}</td><td>${r.timestamp||'—'}</td>
       <td><button class="btn-delete" onclick="deleteFromShortList(${i})">✕</button></td>
     </tr>`;
   }).join('');

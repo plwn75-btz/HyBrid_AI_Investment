@@ -140,6 +140,14 @@
   2. *PEG Ratio Fallback (`valuation_engine.py`, `app.py`)*: Added `peg_fallback` to `calc_forecast_metrics()` and updated `app.py` highlight narrative to use the market PEG (from yfinance/SET) when calculated intra-year growth is $\le 0$.
   3. *Forecast Method Preserved*: Confirmed Python's full-year annualized YoY growth calculation is the industry-standard methodology for real-time forecasting.
 
+### AG. AI Top 10 Shortlist Full Metric Pipeline & Dynamic Sales Growth Alignment
+- **Problem**: Adding stocks to Shortlist from AI Top 10 Ranking cards displayed hardcoded 5.0% for Sale Growth and left ROE (0.0%), D/E (—), EPS Gr (—), Yield (—), and Date time empty.
+- **Root Cause**: `ai_ranking_engine.py` computed valuation metrics in `val_res` but `candidate_dataset.append` and `final_rankings.append` omitted `roe`, `de`, `yoy_eps_growth`, `yoy_sales_growth`, `fv_dcf..fv_pbv`. `addAiStockToShortlist` in `static/ai_ranking.js` received `undefined` fields and fell back to 5.0% / 0.
+- **Solution**:
+  1. *AI Engine Pipeline (`ai_ranking_engine.py`)*: Updated `compute_stock_valuation()` to compute all 5 Fair Value methods (`fv_dcf`, `fv_div`, `fv_ddm`, `fv_per`, `fv_pbv`) and forecast metrics (`yoy_eps_growth`, `forecast_yield`). Passed all metrics (`roe`, `de`, `yoy_sales_growth`, `qoq_sales_growth`, `yoy_eps_growth`, `forecast`) into `candidate_dataset` and `final_rankings`.
+  2. *AI Shortlist Payload (`static/ai_ranking.js`)*: Structured complete payload with `roe`, `de`, actual `sale_growth`, `forecast: { yoy_eps_growth, forecast_yield }`, and full `.toLocaleString()` timestamp. Removed hardcoded 5.0% fallback.
+  3. *Shortlist Table Renderer (`static/app.js`)*: Added defensive fallback accessors (`roeVal`, `deVal`, `epsGrowth`, `saleGrowth`, `yieldVal`) ensuring zero empty dashes across all shortlist sources.
+
 ---
 
 ## 3. Best Practices & Guidelines for Future Updates
