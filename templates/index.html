@@ -221,13 +221,13 @@
         <div class="panel-section trial-section">
           <div class="section-title">TRIAL &amp; SIMULATION</div>
           <div class="param-row">
-            <label class="field-label small">Sale Growth (%)</label>
+            <label class="field-label small">Simulated Sale Growth (%)</label>
             <div class="sim-row">
-              <input type="number" id="saleGrowth" value="5" step="0.5" min="-50" max="100" class="param-input">
+              <input type="number" id="saleGrowth" placeholder="Auto" step="0.5" min="-50" max="100" class="param-input">
               <button class="btn-accent" onclick="runValuation()">SUBMIT</button>
             </div>
           </div>
-          <div class="note-small">Note: Enter Sale Growth % and click SUBMIT to recalculate.</div>
+          <div class="note-small">Actual YoY: <strong id="actualYoySalesG" style="color: #38bdf8;">—</strong> | QoQ: <strong id="actualQoqSalesG" style="color: #38bdf8;">—</strong></div>
         </div>
 
         <!-- Short List Button -->

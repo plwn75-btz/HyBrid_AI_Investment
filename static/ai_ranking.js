@@ -396,7 +396,9 @@ function addAiStockToShortlist(symbol) {
     pe: stock.pe,
     pbv: stock.pbv,
     roe: stock.roe || 0,
-    sale_growth: 5.0,
+    sale_growth: stock.yoy_sales_growth != null ? stock.yoy_sales_growth : 5.0,
+    yoy_sales_growth: stock.yoy_sales_growth,
+    qoq_sales_growth: stock.qoq_sales_growth,
     forecast_yield: stock.div_yield,
     timestamp: new Date().toLocaleDateString('en-GB')
   };

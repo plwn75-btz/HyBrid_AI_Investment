@@ -50,14 +50,14 @@ async function runValuation() {
   const symbol = document.getElementById('symbolInput').value.trim().toUpperCase();
   if (!symbol) { setStatus('Please enter a stock symbol (e.g. AAV, PTT, CPALL)', 'error'); return; }
 
-  const saleGrowth   = parseFloat(document.getElementById('saleGrowth').value)  || 5;
+  const saleGrowthRaw = document.getElementById('saleGrowth').value.trim();
+  const saleGrowth    = saleGrowthRaw !== '' ? parseFloat(saleGrowthRaw) : null;
   const bondYield    = parseFloat(document.getElementById('bondYield').value)   || 3.0;
   const perBenchmark = parseFloat(document.getElementById('perBenchmark').value)|| 15;
   const pbvBenchmark = parseFloat(document.getElementById('pbvBenchmark').value)|| 1.5;
 
   showLoading(true);
   setStatus(`Fetching data for ${symbol} …`, 'loading');
-  document.getElementById('assume-growth').textContent = saleGrowth.toFixed(1) + '%';
 
   try {
     const resp = await fetch('/api/valuate', {
@@ -69,8 +69,9 @@ async function runValuation() {
     showLoading(false);
     if (!resp.ok || data.error) { setStatus('❌ ' + (data.error || 'Unknown error'), 'error'); return; }
 
-    currentResult = { ...data, symbol, sale_growth: saleGrowth, timestamp: new Date().toLocaleString() };
-    renderResult(data, saleGrowth);
+    const effectiveSaleGrowth = data.sale_growth_pct != null ? data.sale_growth_pct : 5.0;
+    currentResult = { ...data, symbol, sale_growth: effectiveSaleGrowth, timestamp: new Date().toLocaleString() };
+    renderResult(data, effectiveSaleGrowth);
     setStatus(`✅ Valuation complete for ${symbol} – ${data.company_name || ''}`, 'success');
 
     // Auto-fetch momentum & news in background
@@ -96,6 +97,11 @@ function renderResult(d, saleGrowth) {
   set('waccDisplay', d.wacc_pct ? d.wacc_pct.toFixed(1) + '%' : '—');
   set('sharesDisplay', d.shares_m != null ? fmtC(d.shares_m, 2) + ' M' : '—');
   set('mktCapDisplay', d.market_cap_m != null ? fmtC(d.market_cap_m, 2) + ' MB' : '—');
+
+  // Update Sales Growth Displays
+  set('assume-growth', saleGrowth != null ? (+saleGrowth).toFixed(1) + '%' : '—%');
+  set('actualYoySalesG', d.yoy_sales_growth != null ? fmtP(d.yoy_sales_growth) : '—');
+  set('actualQoqSalesG', d.qoq_sales_growth != null ? fmtP(d.qoq_sales_growth) : '—');
 
   const website = d.website || '#';
   const wLink = document.getElementById('websiteLink');

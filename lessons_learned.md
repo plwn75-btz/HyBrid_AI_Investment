@@ -121,7 +121,24 @@
 - **Production Architecture**: On Render.com cloud, deployment is driven by `Procfile`:
   `web: gunicorn --worker-class gthread --threads 4 --timeout 300 app:app`
   Gunicorn acts as the production WSGI server, importing `app:app` directly. Flask's `app.run()` block is completely bypassed, eliminating the warning message entirely in cloud production.
-- **RAM & Security Safeguards**: Multi-threaded single-process Gunicorn keeps RAM under ~220MB (well below Render's 512MB limit), while `APP_PASSWORD` environment variable secures authentication without hardcoded secrets.
+### AD. Negative Score Badge Styling (`.pts-neg`) on Scoring Principles Tab
+- **Discovery**: In the **Scoring Principles** tab, positive score items (`+30 pts`, `+20 pts`) were rendered in a green pill badge (`.pts-badge`), while negative score items (`-10 pts`, `-5 pts`, `-15 pts`) used the class `.pts-neg` which was missing CSS rules in `static/screening.css`, resulting in unstyled plain text.
+- **Solution**: Added `.pts-neg` CSS rule in `static/screening.css` with a soft red background (`rgba(239, 68, 68, 0.12)`), red border (`rgba(239, 68, 68, 0.25)`), and red font (`#f87171`), matching the exact pill box badge style of positive scores.
+
+### AE. Dynamic YoY / QoQ Sales Growth Calculation & Integration
+- **Problem**: Sale Growth was previously always defaulting to 5% across Valuation, DCF, and AI Top 10 Ranking cards because the input field `#saleGrowth` had a static `value="5"` default, `/api/valuate` fell back to `5.0%`, and `ai_ranking_engine.py` hardcoded `sale_growth_y1_5 = 0.05` for DCF.
+- **Solution**:
+  1. *Data Fetcher Helper (`data_fetcher.py`)*: Created `_get_historical_sales_growth(ticker, info)` helper to calculate actual `yoy_sales_growth` (%) and `qoq_sales_growth` (%) from quarterly/annual income statements and yfinance data.
+  2. *Valuation Endpoint (`app.py`)*: Updated `/api/valuate` to dynamically default to stock's actual YoY sales growth when no user input is provided, while still supporting user simulation inputs. Returned `yoy_sales_growth` and `qoq_sales_growth` in API payload.
+  3. *DCF & AI Ranking Integration (`ai_ranking_engine.py`)*: Updated Stage 2 DCF calculation in AI Ranking to use the stock's actual YoY sales growth (clamped between -10% and +25% for 5-year projections to prevent one-off quarter outliers from distorting long-term DCF). Included sales growth in card payloads.
+  4. *UI Dashboard (`index.html`, `app.js`, `ai_ranking.js`)*: Added actual YoY/QoQ sales growth badges in Valuation tab under Trial & Simulation, pre-filled auto growth, and passed actual sales growth into shortlist payloads.
+
+### AF. VBA Master Code Benchmark & Negative Value Color / PEG Fallback Alignment
+- **Requirement**: Benchmark Python fundamental valuation formulas against master VBA code (`VBA_Code_02052026.docx`) across sample stocks (AOT, PTTEP, CPN, IVL).
+- **Findings & Fixes**:
+  1. *Color Rules for Negative Ratios (`valuation_engine.py`)*: Python `CRITERIA` thresholds previously used `(0, "red")` for NPM, ROE, ROTC, and ROIC which required $v \ge 0$, causing negative numbers (e.g. IVL NPM $-0.52\%$, ROE $-0.9\%$) to fall through to `"gray"`. Updated to `(None, "red")` catch-all matching VBA where negative ratios are styled red.
+  2. *PEG Ratio Fallback (`valuation_engine.py`, `app.py`)*: Added `peg_fallback` to `calc_forecast_metrics()` and updated `app.py` highlight narrative to use the market PEG (from yfinance/SET) when calculated intra-year growth is $\le 0$.
+  3. *Forecast Method Preserved*: Confirmed Python's full-year annualized YoY growth calculation is the industry-standard methodology for real-time forecasting.
 
 ---
 
@@ -131,4 +148,5 @@
 3. **Cloud Deployment**: Keep `Procfile`, `requirements.txt`, and `runtime.txt` synchronized in project root for continuous integration on Render.com.
 4. **Mermaid Diagrams**: Always use Mermaid v10 `mermaid.render()` JS API, never `<pre class="mermaid">` with HTML entities. Use plain English labels only. Keep text concise, font size $\ge 14\text{px}$, and use distinct stage color classes for visual clarity.
 5. **Tab Bar Style Consistency**: Tab buttons should use text-only labels (no emoji) unless the emoji is a deliberate visual anchor (e.g., `🤖` on AI tab). Font and color of diagram content must match the Inter/dark-navy theme used across all tab content areas.
+
 

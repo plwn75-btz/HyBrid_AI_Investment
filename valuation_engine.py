@@ -218,6 +218,7 @@ def calc_forecast_metrics(
     avg_payout,            # Average payout ratio (decimal)
     current_price,         # Current market price
     multiplier=1,          # Quarter multiplier (Q1=4, Q2=2, Q3=1.33, Q4=1)
+    peg_fallback=None,     # Optional published PEG ratio from data source
 ):
     """
     Returns dict with forecast values matching VBA logic, correctly distinguishing
@@ -262,8 +263,12 @@ def calc_forecast_metrics(
         # Forecast Yield
         forecast_yield = safe_div(forecast_dps, current_price, 0) * 100
 
-        # PEG (requires eps_growth_pct as net profit growth)
+        # PEG (requires eps_growth_pct as net profit growth or calculated yoy_eps_growth)
         peg = safe_div(pe, yoy_eps_growth) if yoy_eps_growth and yoy_eps_growth > 0 else None
+        if peg is None and peg_fallback is not None:
+            f_peg = safe_float(peg_fallback)
+            if f_peg > 0:
+                peg = f_peg
 
         out = {
             "is_forecast": is_forecast,
@@ -314,13 +319,13 @@ def calc_margin_of_safety(fair_value, current_price):
 # Color Rating Helper (from VBA color rules)
 # --------------------------------------------------------------------------
 CRITERIA = {
-    "npm":       [(10, "green"), (5,  "yellow"), (0,  "red")],
-    "roe":       [(20, "green"), (10, "yellow"), (0,  "red")],
+    "npm":       [(10, "green"), (5,  "yellow"), (None, "red")],
+    "roe":       [(20, "green"), (10, "yellow"), (None, "red")],
     "sale_growth": [(10, "green"), (1,  "yellow"), (None, "red")],
     "eps_growth":  [(7,  "green"), (1,  "yellow"), (None, "red")],
     "yield":     [(5,  "green"), (1,  "yellow"), (None, "red")],
-    "rotc":      [(20, "green"), (10, "yellow"), (0,  "red")],
-    "roic":      [(20, "green"), (10, "yellow"), (0,  "red")],
+    "rotc":      [(20, "green"), (10, "yellow"), (None, "red")],
+    "roic":      [(20, "green"), (10, "yellow"), (None, "red")],
 }
 
 def get_color(metric, value):

@@ -112,6 +112,14 @@ def compute_stock_valuation(yf_raw):
         beta = safe_float(yf_raw.get("beta"), 1.0)
         wacc = rf + beta * 0.06
 
+        # Determine 5-yr sales growth for DCF from stock's actual YoY Sales Growth
+        yoy_sg = safe_float(yf_raw.get("yoy_sales_growth"))
+        if yoy_sg is not None and yoy_sg != 0:
+            # Convert to decimal and clamp between -0.10 (-10%) and +0.25 (+25%) for realistic 5-yr DCF model
+            sale_growth_y1_5 = max(-0.10, min(0.25, yoy_sg / 100.0))
+        else:
+            sale_growth_y1_5 = 0.05
+
         fv_dcf = calc_fair_value_dcf(
             revenue=revenue_m,
             ebit_margin=ebit_margin_dec,
@@ -119,7 +127,7 @@ def compute_stock_valuation(yf_raw):
             da_ratio=0.05,
             capex_ratio=0.06,
             nwc_ratio=0.02,
-            sale_growth_y1_5=0.05,
+            sale_growth_y1_5=sale_growth_y1_5,
             sale_growth_y6_10=0.02,
             wacc=wacc,
             g_terminal=0.03,
@@ -131,7 +139,7 @@ def compute_stock_valuation(yf_raw):
 
         if fv_dcf and fv_dcf > 0:
             fair_val = fv_dcf
-            method_note = "10-Yr CAPM DCF Model"
+            method_note = f"10-Yr CAPM DCF Model (Sales Growth {sale_growth_y1_5*100:.1f}%)"
         else:
             valid_vals = [v for v in [fv_per, fv_pbv] if v and v > 0]
             fair_val = float(np.mean(valid_vals)) if valid_vals else 0.0
@@ -148,6 +156,8 @@ def compute_stock_valuation(yf_raw):
         "div_yield": div_yield,
         "net_margin": net_margin,
         "fcf": fcf,
+        "yoy_sales_growth": yf_raw.get("yoy_sales_growth"),
+        "qoq_sales_growth": yf_raw.get("qoq_sales_growth"),
         "fair_value_method_note": method_note
     }
 
@@ -635,6 +645,8 @@ def run_ai_stock_selection(weights=None, date_str=None, rsi=30, stoch=70, min_cr
             'div_yield': fund_info.get('div_yield', 0),
             'pe': fund_info['pe'],
             'pbv': fund_info['pbv'],
+            'yoy_sales_growth': fund_info.get('yoy_sales_growth'),
+            'qoq_sales_growth': fund_info.get('qoq_sales_growth'),
             'criteria_passed': row.get('criteria_passed', 4),
             'tech_score': round(tech_score, 1),
             'fund_score': round(fund_score, 1),
@@ -694,6 +706,8 @@ def run_ai_stock_selection(weights=None, date_str=None, rsi=30, stoch=70, min_cr
             "div_yield": item.get('div_yield', 0),
             "pe": item['pe'],
             "pbv": item['pbv'],
+            "yoy_sales_growth": item.get('yoy_sales_growth'),
+            "qoq_sales_growth": item.get('qoq_sales_growth'),
             "criteria_passed": item['criteria_passed'],
             "composite_score": item['composite_score'],
             "tech_score": item['tech_score'],

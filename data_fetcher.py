@@ -181,6 +181,11 @@ def get_yf_data(symbol: str) -> dict:
             # Historical EPS (quarterly) for YoY growth
             hist_eps = _get_historical_eps(ticker)
 
+            # Historical Sales Growth (YoY and QoQ)
+            sales_growth_info = _get_historical_sales_growth(ticker, info)
+            yoy_sales_growth = sales_growth_info.get("yoy_sales_growth")
+            qoq_sales_growth = sales_growth_info.get("qoq_sales_growth")
+
             # ── XD Dates Extraction ───────────────────────────────────────────
             last_xd_date = None
             upcoming_xd_date = None
@@ -497,6 +502,8 @@ def get_yf_data(symbol: str) -> dict:
                 "cash_m":            _r(cash / 1_000_000) if cash else None,
                 "net_debt_m":        _r((total_debt - cash) / 1_000_000),
                 "hist_eps":          hist_eps,
+                "yoy_sales_growth":  yoy_sales_growth,
+                "qoq_sales_growth":  qoq_sales_growth,
                 "error":             None,
             }
 
@@ -681,6 +688,76 @@ def _get_historical_eps(ticker) -> dict:
     except Exception as e:
         logger.debug(f"Quarterly EPS extraction failed: {e}")
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Historical Sales Growth (YoY and QoQ)
+# ---------------------------------------------------------------------------
+def _get_historical_sales_growth(ticker, info: dict) -> dict:
+    """
+    Calculate actual YoY and QoQ Sales (Revenue) Growth from quarterly/annual income statements.
+    Returns dict with 'yoy_sales_growth' (float, %) and 'qoq_sales_growth' (float, %).
+    Fallback to info['revenueGrowth'] * 100 if quarterly statement math fails.
+    """
+    yoy_sales_growth = None
+    qoq_sales_growth = None
+
+    try:
+        # Fallback from info first if available
+        rg_info = info.get("revenueGrowth") if isinstance(info, dict) else None
+        if rg_info is not None and not _is_nan(rg_info):
+            yoy_sales_growth = round(float(rg_info) * 100, 2)
+
+        q_income = ticker.quarterly_income_stmt
+        if q_income is not None and not q_income.empty:
+            q_income = q_income.reindex(sorted(q_income.columns, reverse=True), axis=1)
+
+            rev_rows = [
+                r for r in q_income.index
+                if any(k in str(r).lower() for k in ["total revenue", "operating revenue", "revenue"])
+            ]
+            if rev_rows:
+                rev_row = rev_rows[0]
+                valid_revs = []
+                for col in q_income.columns:
+                    val = _safe_float(q_income.loc[rev_row, col])
+                    if val is not None and val != 0:
+                        valid_revs.append(val)
+
+                # QoQ: latest quarter vs previous quarter
+                if len(valid_revs) >= 2 and valid_revs[1] != 0:
+                    qoq_calc = ((valid_revs[0] - valid_revs[1]) / abs(valid_revs[1])) * 100
+                    qoq_sales_growth = round(qoq_calc, 2)
+
+                # YoY: latest quarter vs same quarter 1 year ago (index 4)
+                if len(valid_revs) >= 5 and valid_revs[4] != 0:
+                    yoy_calc = ((valid_revs[0] - valid_revs[4]) / abs(valid_revs[4])) * 100
+                    yoy_sales_growth = round(yoy_calc, 2)
+
+        # Fallback for YoY using Annual Financials if still missing
+        if yoy_sales_growth is None:
+            ann_inc = ticker.financials
+            if ann_inc is None or ann_inc.empty:
+                ann_inc = ticker.income_stmt
+            if ann_inc is not None and not ann_inc.empty:
+                ann_inc = ann_inc.reindex(sorted(ann_inc.columns, reverse=True), axis=1)
+                rev_rows = [
+                    r for r in ann_inc.index
+                    if any(k in str(r).lower() for k in ["total revenue", "operating revenue", "revenue"])
+                ]
+                if rev_rows and len(ann_inc.columns) >= 2:
+                    r0 = _safe_float(ann_inc.loc[rev_rows[0], ann_inc.columns[0]])
+                    r1 = _safe_float(ann_inc.loc[rev_rows[0], ann_inc.columns[1]])
+                    if r0 is not None and r1 is not None and r1 != 0:
+                        yoy_sales_growth = round(((r0 - r1) / abs(r1)) * 100, 2)
+
+    except Exception as e:
+        logger.debug(f"Sales growth extraction failed: {e}")
+
+    return {
+        "yoy_sales_growth": yoy_sales_growth,
+        "qoq_sales_growth": qoq_sales_growth,
+    }
 
 
 # ---------------------------------------------------------------------------

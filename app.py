@@ -245,7 +245,7 @@ def valuate():
     """
     data = request.json or {}
     symbol          = (data.get("symbol") or "").strip().upper()
-    sale_growth_pct = safe_float(data.get("sale_growth",    5.0))
+    sale_growth_input = data.get("sale_growth")
     bond_yield_pct  = safe_float(data.get("bond_yield",     round(get_bond_yield() * 100, 3)))
     per_benchmark   = safe_float(data.get("per_benchmark", 15.0))
     pbv_benchmark   = safe_float(data.get("pbv_benchmark",  1.5))
@@ -253,12 +253,22 @@ def valuate():
     if not symbol:
         return jsonify({"error": "Please enter a stock symbol."}), 400
 
-    logger.info(f"Valuation: {symbol} | SaleGrowth={sale_growth_pct}% | Bond={bond_yield_pct}%")
-
     # ── 1. Fetch market data ──────────────────────────────────────────────
     mkt = get_yf_data(symbol)
     if mkt.get("error"):
         return jsonify({"error": mkt["error"]}), 404
+
+    actual_yoy_sales_growth = mkt.get("yoy_sales_growth")
+    actual_qoq_sales_growth = mkt.get("qoq_sales_growth")
+
+    if sale_growth_input is not None and str(sale_growth_input).strip() != "":
+        sale_growth_pct = safe_float(sale_growth_input)
+    elif actual_yoy_sales_growth is not None:
+        sale_growth_pct = actual_yoy_sales_growth
+    else:
+        sale_growth_pct = 5.0
+
+    logger.info(f"Valuation: {symbol} | SaleGrowth={sale_growth_pct}% (Actual YoY={actual_yoy_sales_growth}%) | Bond={bond_yield_pct}%")
 
     # ── 2. Extract raw values ─────────────────────────────────────────────
     price         = safe_float(mkt.get("price"))
@@ -422,6 +432,7 @@ def valuate():
         avg_payout    = payout_pct / 100,   # convert % → decimal for function
         current_price = price,
         multiplier    = multiplier,
+        peg_fallback  = peg,
     )
 
     # ── 7. DuPont Analysis ────────────────────────────────────────────────
@@ -469,7 +480,7 @@ def valuate():
     f_pm    = forecast.get("forecast_price_margin") or 0
     f_dps   = forecast.get("forecast_dps")   or 0
     f_yield = forecast.get("forecast_yield") or 0
-    f_peg   = forecast.get("peg")
+    f_peg   = forecast.get("peg") or peg
     is_forecast = forecast.get("is_forecast", True)
 
     div_yield_disp = mkt.get("dividend_yield")
@@ -547,6 +558,8 @@ def valuate():
         "de":         de,
         "payout":     payout_pct,  # %
         "sale_growth_pct": sale_growth_pct,
+        "yoy_sales_growth": actual_yoy_sales_growth,
+        "qoq_sales_growth": actual_qoq_sales_growth,
         "ebit_margin":     ebit_margin_pct,
         "ebitda":     ebitda,
         "ev":         ev,

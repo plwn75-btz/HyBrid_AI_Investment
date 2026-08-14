@@ -1,11 +1,12 @@
-# HYBRID INVESTMENT – BTZ Inc. Ver. 6.2 (2026 AI Edition)
+# HYBRID INVESTMENT – BTZ Inc. Ver. 6.3 (2026 AI Edition)
 
 An automated, multi-dimensional AI Stock Selection, Screening, and Intrinsic Valuation Web Application for SET-listed stocks.
 
 ---
 
-## 🌟 Key Features (v6.2 AI Edition)
+## 🌟 Key Features (v6.3 AI Edition)
 
+- **📊 Dynamic YoY & QoQ Sales Growth Engine**: Automatically calculates actual Year-over-Year (YoY) and Quarter-over-Quarter (QoQ) sales/revenue growth from quarterly and annual financial statements, replacing static 5% defaults in DCF models, valuation API, and UI badges.
 - **🤖 AI Top 10 Selection Engine**: 5-stage multi-factor stock ranking.
   - **Scoring Weights**: Technical (30%) / Fundamental Valuation (40%) / Momentum (15%) / News Sentiment (5%) / Dividend Profit (10%).
 - **⚖️ Warren Buffett & Peter Lynch Fundamental Model**:
