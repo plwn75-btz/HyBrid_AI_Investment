@@ -636,8 +636,8 @@ def run_ai_stock_selection(weights=None, date_str=None, rsi=30, stoch=70, min_cr
         # Technical Score (includes criteria bonus: 6 -> +30, 5 -> +20, 4 -> +10)
         tech_score = compute_technical_score(row)
 
-        # Fundamentals & Intrinsic Valuation
-        yf_raw = get_yf_data(sym)
+        # Fundamentals & Intrinsic Valuation (Fast Mode: 1 HTTP call per stock + cache)
+        yf_raw = get_yf_data(sym, fast_mode=True)
         val_res = compute_stock_valuation(yf_raw)
 
         price = val_res['price']

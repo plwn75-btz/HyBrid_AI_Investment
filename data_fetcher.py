@@ -12,6 +12,31 @@ logger = logging.getLogger(__name__)
 
 _yf_session = None
 
+# In-memory fundamental cache with 12-hour TTL
+_fundamentals_cache = {}
+_cache_expiry = {}
+CACHE_TTL = 43200  # 12 hours
+_offline_snapshot = None
+
+def _load_offline_snapshot() -> dict:
+    """Loads bundled set_fundamentals.json snapshot as offline fallback."""
+    global _offline_snapshot
+    if _offline_snapshot is not None:
+        return _offline_snapshot
+    try:
+        import json
+        snap_path = os.path.join(os.path.dirname(__file__), "set_fundamentals.json")
+        if os.path.exists(snap_path):
+            with open(snap_path, "r", encoding="utf-8") as f:
+                _offline_snapshot = json.load(f)
+        else:
+            _offline_snapshot = {}
+    except Exception as e:
+        logger.warning(f"Could not load set_fundamentals.json: {e}")
+        _offline_snapshot = {}
+    return _offline_snapshot
+
+
 def get_yf_session():
     global _yf_session
     if _yf_session is not None:
@@ -28,10 +53,10 @@ def get_yf_session():
 
 
 
-def get_yf_data(symbol: str) -> dict:
+def get_yf_data(symbol: str, fast_mode: bool = False) -> dict:
     """
-    Fetch data from yfinance.  Tries SYMBOL.BK first, then bare SYMBOL.
-    Returns a rich dict of financial metrics including DuPont components.
+    Fetch data from yfinance. Tries SYMBOL.BK first, then bare SYMBOL.
+    Supports fast_mode (single ticker.info request) for AI batch ranking and caching.
     """
     try:
         import yfinance as yf
@@ -40,6 +65,15 @@ def get_yf_data(symbol: str) -> dict:
 
     # Remove accidental .BK suffix before adding it back
     symbol_clean = symbol.upper().removesuffix(".BK")
+
+    # 1. Check in-memory cache (12-hour TTL)
+    import time
+    now = time.time()
+    if symbol_clean in _fundamentals_cache:
+        cached = _fundamentals_cache[symbol_clean]
+        if now < _cache_expiry.get(symbol_clean, 0):
+            if fast_mode or cached.get("financial_history"):
+                return cached
     for ticker_str in [f"{symbol_clean}.BK", symbol_clean]:
         try:
             session = get_yf_session()
@@ -127,202 +161,187 @@ def get_yf_data(symbol: str) -> dict:
             ev_m         = _r(ev / 1_000_000) if ev else None
             ev_ebitda    = _r(ev / ebitda) if (ev and ebitda and ebitda != 0) else None
 
-            # ------------------------------------------------------------------
-            # DuPont components: fetch from balance sheet (info.totalAssets = None)
-            # ------------------------------------------------------------------
-            total_assets_abs, total_equity_abs = _get_bs_values(ticker)
-
-            # Asset Turnover = Revenue / Total Assets
-            if revenue and total_assets_abs and total_assets_abs != 0:
-                asset_turnover = _r(revenue / total_assets_abs)
-            else:
-                asset_turnover = None
-
-            # Financial Leverage = Total Assets / Shareholders' Equity
-            if total_assets_abs and total_equity_abs and total_equity_abs != 0:
-                financial_leverage = _r(total_assets_abs / total_equity_abs)
-            else:
-                financial_leverage = None
-
-            total_assets_m = _r(total_assets_abs / 1_000_000) if total_assets_abs else None
-            total_equity_m = _r(total_equity_abs / 1_000_000) if total_equity_abs else None
-
-            # ROTC = Net Income / (Total Debt + Total Equity)  [approx via ROA × Total Assets / Capital]
-            # ROIC = NOPAT / Invested Capital  (use ROA as proxy if missing)
-            # For display, we use ROA as ROTC proxy and ROE as ROIC proxy
-
-            # Calculate D/E from balance sheet using SET's definition: Total Liabilities / Shareholders' Equity
-            # where Total Liabilities = Total Assets - Shareholders' Equity.
-            # This is robust across all sectors (industrial, bank, finance) and matches official SET data.
-            de_bs = None
-            if total_assets_abs and total_equity_abs and total_equity_abs != 0:
-                de_bs = _r((total_assets_abs - total_equity_abs) / total_equity_abs)
-
-            if de_bs is not None:
-                de = de_bs      # Always prefer the balance-sheet Total Liabilities D/E for SET stocks
-
-
             # P/S ratio
-            if price and revenue and shares and shares != 0:
-                ps = _r(price / (revenue / shares))
+            if price_raw and revenue and shares and shares != 0:
+                ps = _r(price_raw / (revenue / shares))
             else:
                 ps = _r(info.get("priceToSalesTrailing12Months"))
 
             mktcap_rev = (_r(market_cap_m / revenue_m)
                           if (market_cap_m and revenue_m and revenue_m != 0) else None)
 
-            # Company metadata
             company_name = info.get("shortName") or info.get("longName") or symbol
             company_full = info.get("longName") or company_name
             sector       = info.get("sector") or info.get("industry") or "—"
             website      = info.get("website") or ""
             industry     = info.get("industry") or "—"
 
-            # Historical EPS (quarterly) for YoY growth
-            hist_eps = _get_historical_eps(ticker)
+            if fast_mode:
+                total_assets_abs, total_equity_abs = None, None
+                asset_turnover     = None
+                financial_leverage = None
+                total_assets_m     = None
+                total_equity_m     = None
+                hist_eps           = {}
+                rg = info.get("revenueGrowth")
+                yoy_sales_growth   = round(float(rg) * 100, 2) if (rg is not None and not _is_nan(rg)) else None
+                eg = info.get("earningsQuarterlyGrowth")
+                qoq_sales_growth   = round(float(eg) * 100, 2) if (eg is not None and not _is_nan(eg)) else None
+                last_xd_date       = None
+                upcoming_xd_date   = None
+                financial_history  = []
+                quarterly_history  = []
+            else:
+                total_assets_abs, total_equity_abs = _get_bs_values(ticker)
 
-            # Historical Sales Growth (YoY and QoQ)
-            sales_growth_info = _get_historical_sales_growth(ticker, info)
-            yoy_sales_growth = sales_growth_info.get("yoy_sales_growth")
-            qoq_sales_growth = sales_growth_info.get("qoq_sales_growth")
+                if revenue and total_assets_abs and total_assets_abs != 0:
+                    asset_turnover = _r(revenue / total_assets_abs)
+                else:
+                    asset_turnover = None
 
-            # ── XD Dates Extraction ───────────────────────────────────────────
-            last_xd_date = None
-            upcoming_xd_date = None
-            try:
-                from datetime import datetime
-                today = datetime.now().date()
-                divs = ticker.dividends
-                if divs is not None and not divs.empty:
-                    xd_dates = [d.date() for d in divs.index]
-                    past_xd = [d for d in xd_dates if d <= today]
-                    future_xd = [d for d in xd_dates if d > today]
-                    if past_xd:
-                        last_xd_date = max(past_xd).strftime('%d %b %Y')
-                    if future_xd:
-                        upcoming_xd_date = min(future_xd).strftime('%d %b %Y')
-                
-                # Fallback for upcoming from calendar
-                if not upcoming_xd_date:
-                    cal = ticker.calendar
-                    if isinstance(cal, dict) and 'Ex-Dividend Date' in cal:
-                        xd = cal['Ex-Dividend Date']
-                        if xd and xd >= today:
-                            upcoming_xd_date = xd.strftime('%d %b %Y')
-            except Exception:
-                pass
+                if total_assets_abs and total_equity_abs and total_equity_abs != 0:
+                    financial_leverage = _r(total_assets_abs / total_equity_abs)
+                else:
+                    financial_leverage = None
 
-            def _get_f_val(df, date, keys):
-                for k in keys:
-                    if k in df.index:
-                        val = df.loc[k, date]
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            return float(val)
-                return None
+                total_assets_m = _r(total_assets_abs / 1_000_000) if total_assets_abs else None
+                total_equity_m = _r(total_equity_abs / 1_000_000) if total_equity_abs else None
 
+                de_bs = None
+                if total_assets_abs and total_equity_abs and total_equity_abs != 0:
+                    de_bs = _r((total_assets_abs - total_equity_abs) / total_equity_abs)
 
-            # ── Financial History Extraction ──────────────────────────────────
-            financial_history = []
-            try:
-                # Try both financials and income_stmt as yfinance data quality varies
-                f = ticker.financials
-                if f is None or f.empty:
-                    f = ticker.income_stmt
+                if de_bs is not None:
+                    de = de_bs
 
-                # Also fetch cashflow, balance sheet, and dividends for new charts
-                cf = ticker.cashflow
-                bs = ticker.balance_sheet
-                divs = ticker.dividends
+                hist_eps = _get_historical_eps(ticker)
 
-                def _match_col_year(df, year):
-                    """Find column in DataFrame matching a given year."""
-                    if df is None or df.empty:
-                        return None
-                    for c in df.columns:
-                        if c.year == year:
-                            return c
+                sales_growth_info = _get_historical_sales_growth(ticker, info)
+                yoy_sales_growth = sales_growth_info.get("yoy_sales_growth")
+                qoq_sales_growth = sales_growth_info.get("qoq_sales_growth")
+
+                last_xd_date = None
+                upcoming_xd_date = None
+                try:
+                    from datetime import datetime
+                    today = datetime.now().date()
+                    divs = ticker.dividends
+                    if divs is not None and not divs.empty:
+                        xd_dates = [d.date() for d in divs.index]
+                        past_xd = [d for d in xd_dates if d <= today]
+                        future_xd = [d for d in xd_dates if d > today]
+                        if past_xd:
+                            last_xd_date = max(past_xd).strftime('%d %b %Y')
+                        if future_xd:
+                            upcoming_xd_date = min(future_xd).strftime('%d %b %Y')
+                    if not upcoming_xd_date:
+                        cal = ticker.calendar
+                        if isinstance(cal, dict) and 'Ex-Dividend Date' in cal:
+                            xd = cal['Ex-Dividend Date']
+                            if xd and xd >= today:
+                                upcoming_xd_date = xd.strftime('%d %b %Y')
+                except Exception:
+                    pass
+
+                def _get_f_val(df, date, keys):
+                    for k in keys:
+                        if k in df.index:
+                            val = df.loc[k, date]
+                            if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                                return float(val)
                     return None
 
-                if f is not None and not f.empty:
-                    # Look back up to 10 years (yfinance may only provide 4-5 for SET stocks)
-                    for col_date in f.columns[:10]:
-                        try:
-                            raw_rev = _get_f_val(f, col_date, ['Total Revenue', 'Revenue', 'Operating Revenue'])
-                            raw_ni  = _get_f_val(f, col_date, ['Net Income', 'Net Income Common Stockholders', 'Net Income from Continuing Ops'])
-                            eps_v   = _get_f_val(f, col_date, ['Basic EPS', 'Diluted EPS', 'Earnings Per Share'])
-                            
-                            # Fallback manual calculation if EPS is missing/NaN (e.g. yfinance data gaps)
-                            if (eps_v is None or math.isnan(eps_v)) and raw_ni is not None:
-                                avg_shares = _get_f_val(f, col_date, ['Basic Average Shares', 'Diluted Average Shares'])
-                                if not avg_shares and shares:
-                                    avg_shares = float(shares)
-                                if avg_shares:
-                                    eps_v = raw_ni / avg_shares
+                # ── Financial History Extraction ──────────────────────────────────
+                financial_history = []
+                try:
+                    f = ticker.financials
+                    if f is None or f.empty:
+                        f = ticker.income_stmt
 
-                            # Convert to Million THB for simplified axis labels
-                            rev_val = (raw_rev / 1_000_000) if raw_rev is not None else None
-                            ni_val  = (raw_ni / 1_000_000) if raw_ni is not None else None
-                            
-                            npm_val = (raw_ni / raw_rev * 100) if raw_rev and raw_ni is not None else None
+                    cf = ticker.cashflow
+                    bs = ticker.balance_sheet
+                    divs = ticker.dividends
 
-                            # ── CFO: Net Cash from Operating Activities ──
-                            cfo_val = None
-                            cf_col = _match_col_year(cf, col_date.year)
-                            if cf_col is not None:
-                                raw_cfo = _get_f_val(cf, cf_col, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities'])
-                                if raw_cfo is not None:
-                                    cfo_val = round(raw_cfo / 1_000_000, 2)
+                    def _match_col_year(df, year):
+                        if df is None or df.empty:
+                            return None
+                        for c in df.columns:
+                            if c.year == year:
+                                return c
+                        return None
 
-                            # ── D/E Ratio from Balance Sheet ──
-                            de_val = None
-                            bs_col = _match_col_year(bs, col_date.year)
-                            if bs_col is not None:
-                                ta = _get_f_val(bs, bs_col, ['Total Assets'])
-                                se = _get_f_val(bs, bs_col, ['Stockholders Equity', 'Common Stock Equity', 'Total Equity Gross Minority Interest'])
-                                if ta and se and se != 0:
-                                    de_val = round((ta - se) / se, 2)
+                    if f is not None and not f.empty:
+                        for col_date in f.columns[:10]:
+                            try:
+                                raw_rev = _get_f_val(f, col_date, ['Total Revenue', 'Revenue', 'Operating Revenue'])
+                                raw_ni  = _get_f_val(f, col_date, ['Net Income', 'Net Income Common Stockholders', 'Net Income from Continuing Ops'])
+                                eps_v   = _get_f_val(f, col_date, ['Basic EPS', 'Diluted EPS', 'Earnings Per Share'])
+                                
+                                if (eps_v is None or math.isnan(eps_v)) and raw_ni is not None:
+                                    avg_shares = _get_f_val(f, col_date, ['Basic Average Shares', 'Diluted Average Shares'])
+                                    if not avg_shares and shares:
+                                        avg_shares = float(shares)
+                                    if avg_shares:
+                                        eps_v = raw_ni / avg_shares
 
-                            financial_history.append({
-                                "year": str(col_date.year),
-                                "revenue": rev_val,
-                                "net_income": ni_val,
-                                "eps": eps_v,
-                                "npm": npm_val,
-                                "cfo": cfo_val,
-                                "de_ratio": de_val,
-                                "dps": None  # filled after loop from dividends
-                            })
-                        except Exception:
-                            continue
-                    financial_history.reverse()
+                                rev_val = (raw_rev / 1_000_000) if raw_rev is not None else None
+                                ni_val  = (raw_ni / 1_000_000) if raw_ni is not None else None
+                                npm_val = (raw_ni / raw_rev * 100) if raw_rev and raw_ni is not None else None
 
-                # ── Fill DPS per year from dividend history ──
-                if divs is not None and not divs.empty:
-                    for entry in financial_history:
-                        yr = int(entry["year"])
-                        yr_divs = divs[divs.index.year == yr]
-                        if not yr_divs.empty:
-                            entry["dps"] = round(float(yr_divs.sum()), 2)
+                                cfo_val = None
+                                cf_col = _match_col_year(cf, col_date.year)
+                                if cf_col is not None:
+                                    raw_cfo = _get_f_val(cf, cf_col, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities'])
+                                    if raw_cfo is not None:
+                                        cfo_val = round(raw_cfo / 1_000_000, 2)
 
-                # ── Add entry for current year in annual history (blank if no official annual data) ──
-                import datetime
-                current_year = datetime.datetime.now().year
-                annual_years = {int(e["year"]) for e in financial_history}
+                                de_val = None
+                                bs_col = _match_col_year(bs, col_date.year)
+                                if bs_col is not None:
+                                    ta = _get_f_val(bs, bs_col, ['Total Assets'])
+                                    se = _get_f_val(bs, bs_col, ['Stockholders Equity', 'Common Stock Equity', 'Total Equity Gross Minority Interest'])
+                                    if ta and se and se != 0:
+                                        de_val = round((ta - se) / se, 2)
 
-                if current_year not in annual_years:
-                    financial_history.append({
-                        "year": str(current_year),
-                        "revenue": None,
-                        "net_income": None,
-                        "eps": None,
-                        "npm": None,
-                        "cfo": None,
-                        "de_ratio": None,
-                        "dps": None,
-                    })
+                                financial_history.append({
+                                    "year": str(col_date.year),
+                                    "revenue": rev_val,
+                                    "net_income": ni_val,
+                                    "eps": eps_v,
+                                    "npm": npm_val,
+                                    "cfo": cfo_val,
+                                    "de_ratio": de_val,
+                                    "dps": None
+                                })
+                            except Exception:
+                                continue
+                        financial_history.reverse()
 
-            except Exception:
-                pass
+                    if divs is not None and not divs.empty:
+                        for entry in financial_history:
+                            yr = int(entry["year"])
+                            yr_divs = divs[divs.index.year == yr]
+                            if not yr_divs.empty:
+                                entry["dps"] = round(float(yr_divs.sum()), 2)
+
+                    import datetime
+                    current_year = datetime.datetime.now().year
+                    annual_years = {int(e["year"]) for e in financial_history}
+
+                    if current_year not in annual_years:
+                        financial_history.append({
+                            "year": str(current_year),
+                            "revenue": None,
+                            "net_income": None,
+                            "eps": None,
+                            "npm": None,
+                            "cfo": None,
+                            "de_ratio": None,
+                            "dps": None,
+                        })
+
+                except Exception as e:
+                    logger.warning(f"Financial history extraction failed: {e}")
 
             # ── Quarterly Financial History ────────────────────────────────────
             quarterly_history = []
@@ -455,7 +474,7 @@ def get_yf_data(symbol: str) -> dict:
                     except IndexError:
                         pass
 
-            return {
+            res_dict = {
                 "ticker":            ticker_str,
                 "company_name":      company_name,
                 "company_full":      company_full,
@@ -507,9 +526,24 @@ def get_yf_data(symbol: str) -> dict:
                 "error":             None,
             }
 
+            # Cache successful result (12h TTL)
+            _fundamentals_cache[symbol_clean] = res_dict
+            _cache_expiry[symbol_clean] = now + CACHE_TTL
+
+            return res_dict
+
         except Exception as e:
             logger.warning(f"yfinance failed for {ticker_str}: {e}")
             continue
+
+    # Fallback to pre-populated offline snapshot if online fetch fails
+    snapshot = _load_offline_snapshot()
+    if symbol_clean in snapshot:
+        snap_item = dict(snapshot[symbol_clean])
+        snap_item["error"] = None
+        _fundamentals_cache[symbol_clean] = snap_item
+        _cache_expiry[symbol_clean] = now + CACHE_TTL
+        return snap_item
 
     return {"error": f"No data found for symbol '{symbol}'. Check the SET ticker."}
 
