@@ -116,6 +116,20 @@ def get_yf_data(symbol: str, fast_mode: bool = False) -> dict:
             if price_raw is None or math.isnan(price_raw):
                 continue
 
+            # If ticker.info failed or returned empty due to Yahoo rate limiting on Render,
+            # load fundamental metrics from bundled set_fundamentals.json snapshot
+            snapshot = _load_offline_snapshot()
+            snap_data = snapshot.get(symbol_clean)
+            if (not info or (info.get("trailingPE") is None and info.get("totalRevenue") is None and info.get("trailingEps") is None)) and snap_data:
+                logger.info(f"Using offline fundamental snapshot for {symbol_clean} (ticker.info rate-limited or empty)")
+                res_dict = dict(snap_data)
+                if price_raw is not None and not math.isnan(price_raw) and price_raw > 0:
+                    res_dict["price"] = _r(price_raw)
+                res_dict["error"] = None
+                _fundamentals_cache[symbol_clean] = res_dict
+                _cache_expiry[symbol_clean] = now + CACHE_TTL
+                return res_dict
+
             price        = _r(price_raw)
             hi52         = _r(info.get("fiftyTwoWeekHigh"))
             lo52         = _r(info.get("fiftyTwoWeekLow"))
